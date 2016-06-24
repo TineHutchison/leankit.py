@@ -1,5 +1,8 @@
 # Copyright 2011-2012 Canonical Ltd
 # -*- coding: utf-8 -*-
+# stolen from:
+# http://bazaar.launchpad.net/~landscape/lp2kanban/trunk/view/head:/src/lp2kanban/kanban.py
+# GNU GPL v3
 
 import requests
 import json
@@ -56,7 +59,7 @@ class LeankitResponseCodes:
         DataInsertSuccess,
         DataUpdateSuccess,
         DataDeleteSuccess,
-        ]
+    ]
 
 
 class LeankitConnector(object):
@@ -68,7 +71,7 @@ class LeankitConnector(object):
 
     def _configure_auth(self, username=None, password=None):
         """Configure the http object to use basic auth headers."""
-        http = requests.sessions.Session()
+        http = requests.Session()
         if username is not None and password is not None:
             http.auth = (username, password)
         return http
@@ -92,33 +95,36 @@ class LeankitConnector(object):
         if delay > 0:
             time.sleep(delay)
         self.last_request_time = time.time()
+        print self.base_api_url + url
         try:
             request = self.http.request(
                 method=action,
                 url=self.base_api_url + url,
                 data=data,
                 auth=self.http.auth,
-                headers=headers,
-                config={},
-                return_response=False)
-            sent = request.send()
+                headers=headers
+                # config={},
+                # return_response=False
+            )
+            # sent = request.send()
+            sent = True
         except AttributeError as e:
             # Weirdly, httplib2 has a habit of throwing an AttributeError
             # when it can't connect, so we handle that nicely.
-            raise IOError("Unable to connect to LeanKitKanban server.")
+            raise IOError("Unable to connect to LeanKitKanban server. ")
         except Exception as e:
             raise IOError("Unable to make HTTP request: %s" % e.message)
 
-        resp = request.response
+        resp = request
         if (not sent or
-            resp.status_code not in LeankitResponseCodes.SUCCESS_CODES):
+                    resp.status_code not in LeankitResponseCodes.SUCCESS_CODES):
             print "Error from kanban"
             pprint(resp)
             raise IOError('kanban error %d' % (resp.status_code))
         response = Record(json.loads(resp.content))
 
         if (handle_errors and
-            response.ReplyCode not in LeankitResponseCodes.SUCCESS_CODES):
+                    response.ReplyCode not in LeankitResponseCodes.SUCCESS_CODES):
             raise IOError('kanban error %d: %s' % (
                 response.ReplyCode, response.ReplyText))
         return response
@@ -181,8 +187,8 @@ class Converter(object):
 
     def __setattr__(self, attr, value):
         if ((not hasattr(self, attr) or
-             getattr(self, attr, None) != value) and
-            attr in self._watched_attrs):
+                     getattr(self, attr, None) != value) and
+                    attr in self._watched_attrs):
             self.direct_setattr('is_dirty', True)
             self.dirty_attrs.add(attr)
         self.direct_setattr(attr, value)
@@ -191,8 +197,10 @@ class Converter(object):
 class LeankitUser(Converter):
     attributes = ['UserName', 'FullName', 'EmailAddress', 'Id']
 
+
 class LeankitCardType(Converter):
     attributes = ['Name', 'IsDefault', 'ColorHex', 'IconPath', 'Id']
+
 
 class LeankitCard(Converter):
     attributes = ['Id', 'Title', 'Priority', 'Description', 'Tags',
@@ -202,7 +210,7 @@ class LeankitCard(Converter):
         'ExternalCardID', 'AssignedUserId', 'Size', 'IsBlocked',
         'BlockReason', 'ExternalSystemName', 'ExternalSystemUrl',
         'ClassOfServiceId', 'DueDate', 'CurrentTaskBoardId'
-        ]
+    ]
 
     def __init__(self, card_dict, lane):
         super(LeankitCard, self).__init__(card_dict)
@@ -234,9 +242,9 @@ class LeankitCard(Converter):
             # no-op.
             return
         data = self._raw_data
-        data["UserWipOverrideComment"] =  None;
+        data["UserWipOverrideComment"] = None;
         if ("AssignedUsers" in data and
-            "assigned_user_id" not in self.dirty_attrs):
+                    "assigned_user_id" not in self.dirty_attrs):
             if 'AssignedUserId' in data.keys():
                 del data['AssignedUserId']
             if 'AssignedUserName' in data.keys():
@@ -245,7 +253,7 @@ class LeankitCard(Converter):
                 lambda X: X['AssignedUserId'], data['AssignedUsers'])
 
         for attr in self.dirty_attrs:
-            #print "Storing %s in %s..." % (attr, self._toCamelCase(attr))
+            # print "Storing %s in %s..." % (attr, self._toCamelCase(attr))
             data[self._toCamelCase(attr)] = getattr(self, attr)
 
         board_id = str(self.lane.board.id)
@@ -255,11 +263,11 @@ class LeankitCard(Converter):
             del data['Id']
             del data['LaneId']
             position = len(self.lane.cards)
-            url_parts = ['/Kanban/Api/Board', board_id,
+            url_parts = ['/kanban/api/board', board_id,
                          'AddCard', 'Lane', str(self.lane.id),
                          'Position', str(position)]
         else:
-            url_parts = ['/Kanban/Api/Board', board_id, 'UpdateCard']
+            url_parts = ['/kanban/api/board', board_id, 'UpdateCard']
 
         url = '/'.join(url_parts)
         try:
@@ -271,7 +279,7 @@ class LeankitCard(Converter):
             return
 
         if (self.is_new and
-                result.ReplyCode in LeankitResponseCodes.SUCCESS_CODES):
+                    result.ReplyCode in LeankitResponseCodes.SUCCESS_CODES):
             self.id = result.ReplyData[0]['CardId']
 
         return result.ReplyData[0]
@@ -299,12 +307,12 @@ class LeankitCard(Converter):
         else:
             raise Exception(
                 "Moving card %s (%s) to %s failed. " % (
-                   self.title, self.id, self.lane.path) +
+                    self.title, self.id, self.lane.path) +
                 "Error %s: %s" % (result.ReplyCode, result.ReplyText))
 
     def _moveCard(self):
         target_pos = len(self.lane.cards)
-        url = '/Kanban/Api/Board/%d/MoveCard/%d/Lane/%d/Position/%d' % (
+        url = '/kanban/api/boards/%d/MoveCard/%d/Lane/%d/Position/%d' % (
             self.lane.board.id, self.id, self.lane.id, target_pos)
         result = self.lane.board.connector.post(url, data=None)
         if result.ReplyCode in LeankitResponseCodes.SUCCESS_CODES:
@@ -348,7 +356,6 @@ class LeankitCard(Converter):
         self.due_date = src.due_date
         self.external_card_id = src.external_card_id
         self.assigned_user_id = src.assigned_user_id
-
 
     @property
     def parsed_description(self):
@@ -485,10 +492,9 @@ class LeankitLane(Converter):
 
 
 class LeankitBoard(Converter):
-
     attributes = ['Id', 'Title', 'CreationDate', 'IsArchived']
 
-    base_uri = '/Kanban/Api/Boards/'
+    base_uri = '/kanban/api/boards/'
 
     def __init__(self, board_dict, connector):
         super(LeankitBoard, self).__init__(board_dict)
@@ -501,7 +507,7 @@ class LeankitBoard(Converter):
             'Orientation': 0,
             'ParentLaneId': -1,
             'Cards': [],
-            }, self)
+        }, self)
         self.lanes = {0: self.root_lane}
         self.cards = []
         self.feature_tag_paths = {}
@@ -537,20 +543,27 @@ class LeankitBoard(Converter):
 
         self._populateUsers(self.details['BoardUsers'])
         self._populateCardTypes(self.details['CardTypes'])
-        self._archive = self.connector.get(
-            "/Kanban/Api/Board/" + str(self.id) + "/Archive").ReplyData[0]
-        archive_lanes = [lane_dict['Lane'] for lane_dict in self._archive]
-        archive_lanes.extend(
-            [lane_dict['Lane'] for
-            lane_dict in self._archive[0]['ChildLanes']])
-        self._backlog = self.connector.get(
-            "/Kanban/Api/Board/" + str(self.id) + "/Backlog").ReplyData[0]
-        self._populateLanes(
-            self.details['Lanes'] + archive_lanes + self._backlog)
+        try:
+            self._archive = self.connector.get(
+                "/kanban/api/boards/" + str(self.id) + "/archive").ReplyData[0]
+            archive_lanes = [lane_dict['Lane'] for lane_dict in self._archive]
+            archive_lanes.extend(
+                [lane_dict['Lane'] for
+                 lane_dict in self._archive[0]['ChildLanes']])
+        except:
+            pass  # leankit returns 404 if there is nothing in the archive
+        try:
+            self._backlog = self.connector.get(
+                "/kanban/api/boards/" + str(self.id) + "/backlog").ReplyData[0]
+            self._populateLanes(
+                self.details['Lanes'] + archive_lanes + self._backlog)
+        except:
+            pass  # leankit returns 404 if there is nothing in the backlog
         for card in self.cards:
             if card.current_task_board_id:  # We are a task board
                 taskboard_data = self.connector.get(
-                    "/Kanban/Api/v1/board/%s/card/%s/taskboard" % (self.id, card.id))
+                    # "/Kanban/Api/v1/board/%s/card/%s/taskboard" % (self.id, card.id))
+                    "/kanban/api/v1/board/%s/card/%s/tasks" % (self.id, card.id))
                 card.taskboard = LeankitTaskBoard(
                     taskboard_data["ReplyData"][0], self, card)
                 card.taskboard.fetchDetails()
@@ -638,10 +651,12 @@ class LeankitBoard(Converter):
 
     def getLane(self, lane_id):
         flat_lanes = {}
+
         def flatten_lane(lane):
             flat_lanes[lane.id] = lane
             for child in lane.child_lanes:
                 flatten_lane(child)
+
         map(flatten_lane, self.root_lane.child_lanes)
         return flat_lanes[lane_id];
 
@@ -677,7 +692,6 @@ class LeankitBoard(Converter):
                 return result
         return None
 
-
     def _printLanes(self, lane, indent, include_cards=False):
         next_lane = lane.getNextLanes()
         if next_lane is None:
@@ -705,12 +719,11 @@ class LeankitBoard(Converter):
 
 
 class LeankitTaskBoard(LeankitBoard):
-
     attributes = ['Id', 'Title']
 
     def __init__(self, taskboard_dict, board, parent_card):
         super(LeankitTaskBoard, self).__init__(taskboard_dict, board.connector)
-        self.base_uri = '/Api/Board/%d/TaskBoard/%s/Get' % (board.id, self.id)
+        self.base_uri = '/api/v1/board/%d/card/%s/taskboard' % (board.id, self.id)
         self.cardtypes = board.cardtypes
         self.parent_board = board
         self.parent_card = parent_card
@@ -722,7 +735,6 @@ class LeankitTaskBoard(LeankitBoard):
 
 
 class LeankitKanban(object):
-
     def __init__(self, account, username=None, password=None):
         self.connector = LeankitConnector(account, username, password)
         self._boards = []
@@ -734,7 +746,7 @@ class LeankitKanban(object):
 
         :param include_archived: if True, include archived boards as well.
         """
-        boards_data = self.connector.get('/Kanban/Api/Boards').ReplyData
+        boards_data = self.connector.get('/kanban/api/boards').ReplyData
         boards = []
         for board_dict in boards_data[0]:
             board = LeankitBoard(board_dict, self.connector)
@@ -777,18 +789,18 @@ class LeankitKanban(object):
 
 
 if __name__ == '__main__':
-    kanban = LeankitKanban('launchpad.leankitkanban.com',
-                           'user@email', 'password')
+    lk = LeankitKanban('accountname',
+                       'user@email', 'password')
 
     print "Active boards:"
-    boards = kanban.getBoards()
+    boards = lk.getBoards()
     for board in boards:
         print " * %s (%d)" % (board.title, board.id)
 
     # Get a board by the title.
-    board_name = 'Landscape 2016'
+    board_name = 'Testing'
     print "Getting board '%s'..." % board_name
-    board = kanban.getBoard(title=board_name)
+    board = lk.getBoard(title=board_name)
     board.printLanes()
 
     # Print all users.
